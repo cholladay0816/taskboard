@@ -28,6 +28,7 @@ import { api, type Ticket, type Project, type Team, type BoardColumn } from "../
 import TicketPanel from "../components/TicketPanel";
 import CreateTicketModal from "../components/CreateTicketModal";
 
+const BOARD_POLL_INTERVAL_MS = 5000;
 const STATUSES = ["todo", "in_progress", "done"];
 const STATUS_LABELS: Record<string, string> = {
   todo: "Todo",
@@ -252,9 +253,7 @@ export default function Board() {
       const board = await api.board.get(selectedProject || undefined);
       setColumns(board.columns || []);
     } catch {
-      setColumns(
-        STATUSES.map((status) => ({ status, tickets: [] }))
-      );
+      // Keep the last board visible if a background refresh fails.
     }
     setLoading(false);
   }, [selectedProject]);
@@ -268,6 +267,15 @@ export default function Board() {
     setLoading(true);
     loadBoard();
   }, [loadBoard]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible" && !activeTicket && !selectedTicket && !createForStatus) {
+        loadBoard();
+      }
+    }, BOARD_POLL_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, [activeTicket, selectedTicket, createForStatus, loadBoard]);
 
   const getColumnTickets = (status: string) =>
     columns.find((c) => c.status === status)?.tickets || [];
