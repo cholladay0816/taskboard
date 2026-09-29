@@ -1,7 +1,13 @@
 name: CI
+run-name: CI ${{ inputs.ref || github.ref_name }}
 
 on:
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "Optional branch or commit to verify (Linux checks only)"
+        type: string
+        required: false
   push:
     branches: [main]
   pull_request:
@@ -13,6 +19,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       - uses: actions/setup-go@v5
         with:
@@ -43,6 +51,7 @@ jobs:
         run: go test ./...
 
   windows:
+    if: ${{ inputs.ref == '' }}
     runs-on: windows-latest
 
     steps:
