@@ -1,21 +1,15 @@
 import { useState } from "react";
 import { X, Trash2, CheckCircle2, Circle, Pencil, Eye } from "lucide-react";
 import Markdown from "react-markdown";
-import { api, type Ticket, type Project, type Team, type Subtask } from "../api/client";
+import { api, type Ticket, type Project, type Team, type Subtask, type BoardColumnDefinition } from "../api/client";
 
-const STATUSES = ["todo", "in_progress", "done"];
 const PRIORITIES = ["urgent", "high", "medium", "low"];
-
-const STATUS_LABELS: Record<string, string> = {
-  todo: "Todo",
-  in_progress: "In Progress",
-  done: "Done",
-};
 
 export default function TicketPanel({
   ticket,
   projects,
   teams,
+  columns,
   onClose,
   onUpdate,
   onDelete,
@@ -23,6 +17,7 @@ export default function TicketPanel({
   ticket: Ticket;
   projects: Project[];
   teams: Team[];
+  columns: Pick<BoardColumnDefinition, "id" | "name">[];
   onClose: () => void;
   onUpdate: (id: string, data: Partial<Ticket>) => void;
   onDelete: (id: string) => void;
@@ -172,9 +167,9 @@ export default function TicketPanel({
                 }}
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
-                {STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {STATUS_LABELS[s]}
+                {columns.map((column) => (
+                  <option key={column.id} value={column.id}>
+                    {column.name}
                   </option>
                 ))}
               </select>

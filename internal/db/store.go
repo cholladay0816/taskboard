@@ -218,6 +218,119 @@ func (s *Store) nextTicketNumber(projectID string) (int, error) {
 	return num, err
 }
 
+func (s *Store) checkBoardColumn(id string) error {
+	var count int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM board_columns WHERE id = ?", id).Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		return fmt.Errorf("board column not found: %s", id)
+	}
+	return nil
+}
+
+func (s *Store) ListBoardColumns() ([]models.BoardColumn, error) {
+	rows, err := s.db.Query("SELECT id, name, color, position FROM board_columns ORDER BY position, id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	columns := []models.BoardColumn{}
+	for rows.Next() {
+		var column models.BoardColumn
+		if err := rows.Scan(&column.ID, &column.Name, &column.Color, &column.Position); err != nil {
+			return nil, err
+		}
+		columns = append(columns, column)
+	}
+	return columns, rows.Err()
+}
+
+func (s *Store) CreateBoardColumn(name string) (*models.BoardColumn, error) {
+	column := &models.BoardColumn{ID: newID(), Name: name, Color: "#a78bfa"}
+	_, err := s.db.Exec(`INSERT INTO board_columns (id, name, color, position)
+		VALUES (?, ?, ?, (SELECT COALESCE(MAX(position), -1) + 1 FROM board_columns))`, column.ID, column.Name, column.Color)
+	if err != nil {
+		return nil, err
+	}
+	err = s.db.QueryRow("SELECT position FROM board_columns WHERE id = ?", column.ID).Scan(&column.Position)
+	return column, err
+}
+
+func (s *Store) UpdateBoardColumn(id, name, color string) error {
+	result, err := s.db.Exec("UPDATE board_columns SET name = ?, color = ? WHERE id = ?", name, color, id)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return fmt.Errorf("board column not found")
+	}
+	return nil
+}
+
+func (s *Store) DeleteBoardColumn(id string) error {
+	var count int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM tickets WHERE status = ?", id).Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return fmt.Errorf("move all tickets before deleting this column")
+	}
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM board_columns").Scan(&count); err != nil {
+		return err
+	}
+	if count <= 1 {
+		return fmt.Errorf("the board needs at least one column")
+	}
+	result, err := s.db.Exec("DELETE FROM board_columns WHERE id = ?", id)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return fmt.Errorf("board column not found")
+	}
+	return nil
+}
+
+func (s *Store) ReorderBoardColumns(ids []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var count int
+	if err := tx.QueryRow("SELECT COUNT(*) FROM board_columns").Scan(&count); err != nil {
+		return err
+	}
+	if len(ids) != count {
+		return fmt.Errorf("provide every board column exactly once")
+	}
+	seen := make(map[string]bool, len(ids))
+	for position, id := range ids {
+		if seen[id] {
+			return fmt.Errorf("duplicate board column")
+		}
+		seen[id] = true
+		result, err := tx.Exec("UPDATE board_columns SET position = ? WHERE id = ?", position, id)
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil || changed != 1 {
+			return fmt.Errorf("invalid or duplicate board column")
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error) {
 	query := `SELECT t.id, t.project_id, t.team_id, t.number, t.title, t.description,
 		t.status, t.priority, t.due_date, t.position, t.created_at, t.updated_at,
@@ -304,7 +417,12 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 
 	status := req.Status
 	if status == "" {
-		status = "todo"
+		if err := s.db.QueryRow("SELECT id FROM board_columns ORDER BY position, id LIMIT 1").Scan(&status); err != nil {
+			return nil, fmt.Errorf("finding default board column: %w", err)
+		}
+	}
+	if err := s.checkBoardColumn(status); err != nil {
+		return nil, err
 	}
 	priority := req.Priority
 	if priority == "" {
@@ -369,6 +487,9 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest) (*models
 		t.Description = *req.Description
 	}
 	if req.Status != nil {
+		if err := s.checkBoardColumn(*req.Status); err != nil {
+			return nil, err
+		}
 		t.Status = *req.Status
 	}
 	if req.Priority != nil {
@@ -414,6 +535,9 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest) (*models
 }
 
 func (s *Store) MoveTicket(id string, req models.MoveTicketRequest) (*models.Ticket, error) {
+	if err := s.checkBoardColumn(req.Status); err != nil {
+		return nil, err
+	}
 	now := time.Now()
 	position := float64(0)
 	if req.Position != nil {
@@ -438,14 +562,17 @@ func (s *Store) DeleteTicket(id string) error {
 }
 
 func (s *Store) GetBoard(projectID string) (*models.Board, error) {
-	statuses := []string{"todo", "in_progress", "done"}
+	columns, err := s.ListBoardColumns()
+	if err != nil {
+		return nil, err
+	}
 	board := &models.Board{
 		ProjectID: projectID,
-		Columns:   make([]models.Column, len(statuses)),
+		Columns:   make([]models.Column, len(columns)),
 	}
 
-	for i, status := range statuses {
-		filter := models.TicketFilter{Status: status}
+	for i, column := range columns {
+		filter := models.TicketFilter{Status: column.ID}
 		if projectID != "" {
 			filter.ProjectID = projectID
 		}
@@ -457,7 +584,10 @@ func (s *Store) GetBoard(projectID string) (*models.Board, error) {
 			tickets = []models.Ticket{}
 		}
 		board.Columns[i] = models.Column{
-			Status:  status,
+			ID:      column.ID,
+			Status:  column.ID,
+			Name:    column.Name,
+			Color:   column.Color,
 			Tickets: tickets,
 		}
 	}

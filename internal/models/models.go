@@ -96,8 +96,18 @@ type Board struct {
 }
 
 type Column struct {
-	Status  string   `json:"status"`
+	ID      string   `json:"id"`
+	Status  string   `json:"status"` // Kept for existing board and MCP clients.
+	Name    string   `json:"name"`
+	Color   string   `json:"color"`
 	Tickets []Ticket `json:"tickets"`
+}
+
+type BoardColumn struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Color    string `json:"color"`
+	Position int    `json:"position"`
 }
 
 type CreateProjectRequest struct {

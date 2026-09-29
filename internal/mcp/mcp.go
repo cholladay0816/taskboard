@@ -467,7 +467,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				Properties: map[string]schemaProp{
 					"projectId": {Type: "string", Description: "Filter by project ID"},
 					"teamId":    {Type: "string", Description: "Filter by team ID"},
-					"status":    {Type: "string", Description: "Filter by status", Enum: []string{"todo", "in_progress", "done"}},
+					"status":    {Type: "string", Description: "Filter by board column ID (see get_board)"},
 					"priority":  {Type: "string", Description: "Filter by priority", Enum: []string{"urgent", "high", "medium", "low"}},
 				},
 			},
@@ -493,7 +493,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"projectId":   {Type: "string", Description: "Project ID"},
 					"title":       {Type: "string", Description: "Ticket title"},
 					"description": {Type: "string", Description: "Rich text description"},
-					"status":      {Type: "string", Description: "Initial status", Enum: []string{"todo", "in_progress", "done"}},
+					"status":      {Type: "string", Description: "Initial board column ID (see get_board)"},
 					"priority":    {Type: "string", Description: "Priority level", Enum: []string{"urgent", "high", "medium", "low"}},
 					"teamId":      {Type: "string", Description: "Team ID"},
 					"dueDate":     {Type: "string", Description: "Due date (YYYY-MM-DD)"},
@@ -510,7 +510,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"id":          {Type: "string", Description: "Ticket ID"},
 					"title":       {Type: "string", Description: "Ticket title"},
 					"description": {Type: "string", Description: "Description"},
-					"status":      {Type: "string", Description: "Status", Enum: []string{"todo", "in_progress", "done"}},
+					"status":      {Type: "string", Description: "Board column ID (see get_board)"},
 					"priority":    {Type: "string", Description: "Priority", Enum: []string{"urgent", "high", "medium", "low"}},
 					"teamId":      {Type: "string", Description: "Team ID"},
 					"dueDate":     {Type: "string", Description: "Due date (YYYY-MM-DD)"},
@@ -525,7 +525,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				Type: "object",
 				Properties: map[string]schemaProp{
 					"id":     {Type: "string", Description: "Ticket ID"},
-					"status": {Type: "string", Description: "Target status", Enum: []string{"todo", "in_progress", "done"}},
+					"status": {Type: "string", Description: "Target board column ID (see get_board)"},
 				},
 				Required: []string{"id", "status"},
 			},
@@ -542,7 +542,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		// --- Board ---
 		{
 			Name:        "get_board",
-			Description: "Get full Kanban board grouped by status columns (todo, in_progress, done)",
+			Description: "Get full Kanban board with its ordered column IDs, names, colors, and tickets",
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{

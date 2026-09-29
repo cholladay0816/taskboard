@@ -9,24 +9,11 @@ import {
   Calendar,
   Ticket as TicketIcon,
 } from "lucide-react";
-import { api, type Ticket, type Project, type Team } from "../api/client";
+import { api, type Ticket, type Project, type Team, type BoardColumnDefinition } from "../api/client";
 import TicketPanel from "../components/TicketPanel";
 import CreateTicketModal from "../components/CreateTicketModal";
 
-const STATUSES = ["todo", "in_progress", "done"];
 const PRIORITIES = ["urgent", "high", "medium", "low"];
-
-const STATUS_STYLES: Record<string, string> = {
-  todo: "bg-slate-500/20 text-slate-400",
-  in_progress: "bg-blue-500/20 text-blue-400",
-  done: "bg-green-500/20 text-green-400",
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  todo: "Todo",
-  in_progress: "In Progress",
-  done: "Done",
-};
 
 const PRIORITY_CONFIG: Record<string, { style: string; icon: typeof ArrowUp }> = {
   urgent: { style: "bg-red-500/20 text-red-400", icon: AlertTriangle },
@@ -35,14 +22,14 @@ const PRIORITY_CONFIG: Record<string, { style: string; icon: typeof ArrowUp }> =
   low: { style: "bg-green-500/20 text-green-400", icon: ArrowDown },
 };
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status, columns }: { status: string; columns: BoardColumnDefinition[] }) {
+  const column = columns.find((item) => item.id === status);
   return (
     <span
-      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium capitalize ${
-        STATUS_STYLES[status] || "bg-slate-700 text-slate-300"
-      }`}
+      className="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium"
+      style={{ color: column?.color || "#cbd5e1", backgroundColor: column ? `${column.color}25` : "#334155" }}
     >
-      {STATUS_LABELS[status] || status}
+      {column?.name || status}
     </span>
   );
 }
@@ -65,6 +52,7 @@ export default function Tickets() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
+  const [columns, setColumns] = useState<BoardColumnDefinition[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
@@ -75,23 +63,27 @@ export default function Tickets() {
 
   const load = useCallback(async () => {
     try {
-      const [t, p, tm] = await Promise.all([
+      const [t, p, tm, c] = await Promise.all([
         api.tickets.list(),
         api.projects.list(),
         api.teams.list(),
+        api.boardColumns.list(),
       ]);
       setTickets(t || []);
       setProjects(p || []);
       setTeams(tm || []);
+      setColumns(c || []);
     } catch {
       setTickets([]);
       setProjects([]);
       setTeams([]);
+      setColumns([]);
     }
     setLoading(false);
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
 
@@ -150,9 +142,9 @@ export default function Tickets() {
           className="bg-slate-800 text-xs text-slate-300 rounded-md border border-slate-700 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
         >
           <option value="">All Statuses</option>
-          {STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {STATUS_LABELS[s]}
+          {columns.map((column) => (
+            <option key={column.id} value={column.id}>
+              {column.name}
             </option>
           ))}
         </select>
@@ -213,7 +205,7 @@ export default function Tickets() {
                     </span>
                   </td>
                   <td className="px-6 py-3">
-                    <StatusBadge status={ticket.status} />
+                    <StatusBadge status={ticket.status} columns={columns} />
                   </td>
                   <td className="px-6 py-3">
                     <PriorityBadge priority={ticket.priority} />
@@ -242,6 +234,7 @@ export default function Tickets() {
         <CreateTicketModal
           projects={projects}
           teams={teams}
+          defaultStatus={columns[0]?.id}
           onClose={() => setShowCreate(false)}
           onCreate={handleCreate}
         />
@@ -252,6 +245,7 @@ export default function Tickets() {
           ticket={selectedTicket}
           projects={projects}
           teams={teams}
+          columns={columns}
           onClose={() => {
             setSelectedTicket(null);
             load();

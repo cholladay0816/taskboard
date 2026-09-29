@@ -23,22 +23,13 @@ import {
   FolderKanban,
   Users,
   Plus,
+  GripVertical,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 import { api, type Ticket, type Project, type Team, type BoardColumn } from "../api/client";
 import TicketPanel from "../components/TicketPanel";
 import CreateTicketModal from "../components/CreateTicketModal";
-
-const STATUSES = ["todo", "in_progress", "done"];
-const STATUS_LABELS: Record<string, string> = {
-  todo: "Todo",
-  in_progress: "In Progress",
-  done: "Done",
-};
-const STATUS_COLORS: Record<string, string> = {
-  todo: "bg-slate-500",
-  in_progress: "bg-blue-500",
-  done: "bg-green-500",
-};
 
 const PRIORITY_CONFIG: Record<string, { color: string; icon: typeof ArrowUp }> = {
   urgent: { color: "text-red-500", icon: AlertTriangle },
@@ -177,39 +168,56 @@ function DraggableTicket({
 }
 
 function Column({
-  status,
+  column,
   tickets,
   projects,
   teams,
   onTicketClick,
   onAddTicket,
+  onRename,
+  onColorChange,
+  onDelete,
 }: {
-  status: string;
+  column: BoardColumn;
   tickets: Ticket[];
   projects: Project[];
   teams: Team[];
   onTicketClick: (ticket: Ticket) => void;
   onAddTicket: (status: string) => void;
+  onRename: (column: BoardColumn) => void;
+  onColorChange: (column: BoardColumn, color: string) => void;
+  onDelete: (column: BoardColumn) => void;
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: status });
+  const { setNodeRef, isOver } = useDroppable({ id: column.id });
+  const { attributes, listeners, setNodeRef: setDragRef, isDragging } = useDraggable({
+    id: column.id,
+    data: { type: "column" },
+  });
 
   return (
-    <div className="flex flex-col w-80 shrink-0">
+    <div ref={setNodeRef} className={`flex flex-col w-80 shrink-0 ${isDragging ? "opacity-40" : ""}`}>
       <div className="flex items-center gap-2 px-1 pb-3">
-        <div className={`w-2 h-2 rounded-full ${STATUS_COLORS[status]}`} />
-        <h3 className="text-sm font-medium text-slate-300">
-          {STATUS_LABELS[status]}
+        <button ref={setDragRef} {...listeners} {...attributes} aria-label={`Reorder ${column.name}`} className="cursor-grab text-slate-500 hover:text-slate-200 active:cursor-grabbing">
+          <GripVertical className="w-4 h-4" />
+        </button>
+        <label title={`Change ${column.name} color`} className="relative h-4 w-4 cursor-pointer rounded-full" style={{ backgroundColor: column.color }}>
+          <input type="color" value={column.color} aria-label={`${column.name} color`} onChange={(e) => onColorChange(column, e.target.value)} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
+        </label>
+        <h3 className="min-w-0 flex-1 truncate text-sm font-medium text-slate-300" title={column.name}>
+          {column.name}
         </h3>
-        <span className="text-xs text-slate-600 ml-auto">{tickets.length}</span>
+        <span className="text-xs text-slate-600">{tickets.length}</span>
         <button
-          onClick={() => onAddTicket(status)}
+          onClick={() => onAddTicket(column.id)}
+          aria-label={`Add ticket to ${column.name}`}
           className="text-slate-600 hover:text-slate-300 transition-colors"
         >
           <Plus className="w-4 h-4" />
         </button>
+        <button onClick={() => onRename(column)} aria-label={`Rename ${column.name}`} className="text-slate-600 hover:text-slate-300"><Pencil className="w-3.5 h-3.5" /></button>
+        <button onClick={() => onDelete(column)} aria-label={`Delete ${column.name}`} className="text-slate-600 hover:text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>
       </div>
       <div
-        ref={setNodeRef}
         className={`flex-1 space-y-2 rounded-lg p-2 transition-colors min-h-32 ${
           isOver ? "bg-blue-500/5 ring-1 ring-blue-500/20" : ""
         }`}
@@ -242,6 +250,8 @@ export default function Board() {
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [createForStatus, setCreateForStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activeColumn, setActiveColumn] = useState<BoardColumn | null>(null);
+  const [error, setError] = useState("");
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -252,9 +262,7 @@ export default function Board() {
       const board = await api.board.get(selectedProject || undefined);
       setColumns(board.columns || []);
     } catch {
-      setColumns(
-        STATUSES.map((status) => ({ status, tickets: [] }))
-      );
+      setError("Could not load the board. Please retry.");
     }
     setLoading(false);
   }, [selectedProject]);
@@ -265,12 +273,13 @@ export default function Board() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     loadBoard();
   }, [loadBoard]);
 
   const getColumnTickets = (status: string) =>
-    columns.find((c) => c.status === status)?.tickets || [];
+    columns.find((c) => c.id === status)?.tickets || [];
 
   const findTicketById = (id: UniqueIdentifier): Ticket | undefined => {
     for (const col of columns) {
@@ -282,22 +291,28 @@ export default function Board() {
 
   const findColumnByTicketId = (id: UniqueIdentifier): string | undefined => {
     for (const col of columns) {
-      if (col.tickets.find((t) => t.id === id)) return col.status;
+      if (col.tickets.find((t) => t.id === id)) return col.id;
     }
     return undefined;
   };
 
   const handleDragStart = (event: DragStartEvent) => {
+    const column = columns.find((item) => item.id === event.active.id);
+    if (column) {
+      setActiveColumn(column);
+      return;
+    }
     const ticket = findTicketById(event.active.id);
     setActiveTicket(ticket ?? null);
   };
 
   const handleDragOver = (event: DragOverEvent) => {
+    if (event.active.data.current?.type === "column") return;
     const { active, over } = event;
     if (!over) return;
 
     const activeStatus = findColumnByTicketId(active.id);
-    const overStatus = STATUSES.includes(over.id as string)
+    const overStatus = columns.some((column) => column.id === over.id)
       ? (over.id as string)
       : findColumnByTicketId(over.id);
 
@@ -305,10 +320,10 @@ export default function Board() {
 
     setColumns((prev) =>
       prev.map((col) => {
-        if (col.status === activeStatus) {
+        if (col.id === activeStatus) {
           return { ...col, tickets: col.tickets.filter((t) => t.id !== active.id) };
         }
-        if (col.status === overStatus) {
+        if (col.id === overStatus) {
           const ticket = findTicketById(active.id);
           if (!ticket) return col;
           return { ...col, tickets: [...col.tickets, { ...ticket, status: overStatus }] };
@@ -321,10 +336,30 @@ export default function Board() {
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
     setActiveTicket(null);
+    setActiveColumn(null);
+
+    if (active.data.current?.type === "column") {
+      if (!over) return;
+      const targetID = columns.some((column) => column.id === over.id)
+        ? String(over.id) : findColumnByTicketId(over.id);
+      const from = columns.findIndex((column) => column.id === active.id);
+      const to = columns.findIndex((column) => column.id === targetID);
+      if (from < 0 || to < 0 || from === to) return;
+      const ordered = [...columns];
+      ordered.splice(to, 0, ...ordered.splice(from, 1));
+      setColumns(ordered);
+      try {
+        await api.boardColumns.reorder(ordered.map((column) => column.id));
+      } catch {
+        setError("Could not reorder columns.");
+        loadBoard();
+      }
+      return;
+    }
 
     if (!over) return;
 
-    const targetStatus = STATUSES.includes(over.id as string)
+    const targetStatus = columns.some((column) => column.id === over.id)
       ? (over.id as string)
       : findColumnByTicketId(over.id);
 
@@ -357,6 +392,52 @@ export default function Board() {
     loadBoard();
   };
 
+  const handleAddColumn = async () => {
+    const name = window.prompt("Column name")?.trim();
+    if (!name) return;
+    try {
+      await api.boardColumns.create(name);
+      setError("");
+      loadBoard();
+    } catch {
+      setError("Could not create the column.");
+    }
+  };
+
+  const handleRenameColumn = async (column: BoardColumn) => {
+    const name = window.prompt("Column name", column.name)?.trim();
+    if (!name || name === column.name) return;
+    try {
+      await api.boardColumns.update(column.id, name, column.color);
+      setError("");
+      loadBoard();
+    } catch {
+      setError("Could not rename the column.");
+    }
+  };
+
+  const handleColorChange = async (column: BoardColumn, color: string) => {
+    setColumns((current) => current.map((item) => item.id === column.id ? { ...item, color } : item));
+    try {
+      await api.boardColumns.update(column.id, column.name, color);
+      setError("");
+    } catch {
+      setError("Could not update the column color.");
+      loadBoard();
+    }
+  };
+
+  const handleDeleteColumn = async (column: BoardColumn) => {
+    if (!window.confirm(`Delete the ${column.name} column? Move its tickets first.`)) return;
+    try {
+      await api.boardColumns.delete(column.id);
+      setError("");
+      loadBoard();
+    } catch {
+      setError("Could not delete the column. Move its tickets first, including tickets in other projects.");
+    }
+  };
+
   return (
     <div className="h-full flex flex-col">
       <header className="shrink-0 flex items-center justify-between px-6 h-14 border-b border-slate-800">
@@ -375,6 +456,7 @@ export default function Board() {
         </select>
       </header>
 
+      {error && <div role="alert" className="shrink-0 border-b border-red-500/30 px-6 py-2 text-sm text-red-300">{error}</div>}
       <div className="flex-1 overflow-x-auto p-6">
         {loading ? (
           <div className="flex items-center justify-center h-full text-slate-600">
@@ -387,22 +469,35 @@ export default function Board() {
             onDragStart={handleDragStart}
             onDragOver={handleDragOver}
             onDragEnd={handleDragEnd}
+            onDragCancel={() => {
+              setActiveTicket(null);
+              setActiveColumn(null);
+              loadBoard();
+            }}
           >
             <div className="flex gap-6 h-full">
-              {STATUSES.map((status) => (
+              {columns.map((column) => (
                 <Column
-                  key={status}
-                  status={status}
-                  tickets={getColumnTickets(status)}
+                  key={column.id}
+                  column={column}
+                  tickets={getColumnTickets(column.id)}
                   projects={projects}
                   teams={teams}
                   onTicketClick={handleTicketClick}
                   onAddTicket={setCreateForStatus}
+                  onRename={handleRenameColumn}
+                  onColorChange={handleColorChange}
+                  onDelete={handleDeleteColumn}
                 />
               ))}
+              <button onClick={handleAddColumn} className="flex h-12 w-48 shrink-0 items-center justify-center gap-2 rounded-lg border border-dashed border-slate-700 text-sm text-slate-400 hover:border-blue-500 hover:text-blue-300"><Plus className="h-4 w-4" /> Add column</button>
             </div>
             <DragOverlay>
-              {activeTicket ? (
+              {activeColumn ? (
+                <div className="rounded-lg border border-blue-500/40 bg-slate-900 px-4 py-3 text-sm text-slate-200 shadow-xl" style={{ borderLeftColor: activeColumn.color }}>
+                  {activeColumn.name}
+                </div>
+              ) : activeTicket ? (
                 <div className="w-80">
                   <TicketCard ticket={activeTicket} projects={projects} teams={teams} isDragging />
                 </div>
@@ -427,6 +522,7 @@ export default function Board() {
           ticket={selectedTicket}
           projects={projects}
           teams={teams}
+          columns={columns}
           onClose={() => {
             setSelectedTicket(null);
             loadBoard();

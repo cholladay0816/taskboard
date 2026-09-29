@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
+	"strings"
 	"sync"
 
 	"github.com/creack/pty"
@@ -75,6 +77,14 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 			r.Post("/{id}/move", s.moveTicket)
 			r.Delete("/{id}", s.deleteTicket)
 			r.Post("/{id}/subtasks", s.addSubtask)
+		})
+
+		r.Route("/board-columns", func(r chi.Router) {
+			r.Get("/", s.listBoardColumns)
+			r.Post("/", s.createBoardColumn)
+			r.Put("/{id}", s.updateBoardColumn)
+			r.Delete("/{id}", s.deleteBoardColumn)
+			r.Post("/reorder", s.reorderBoardColumns)
 		})
 
 		r.Route("/subtasks", func(r chi.Router) {
@@ -352,6 +362,72 @@ func (s *Server) moveTicket(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteTicket(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.DeleteTicket(chi.URLParam(r, "id")); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+var columnColorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+func (s *Server) listBoardColumns(w http.ResponseWriter, r *http.Request) {
+	columns, err := s.store.ListBoardColumns()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, columns)
+}
+
+func (s *Server) createBoardColumn(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &req); err != nil || strings.TrimSpace(req.Name) == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	column, err := s.store.CreateBoardColumn(strings.TrimSpace(req.Name))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, column)
+}
+
+func (s *Server) updateBoardColumn(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name  string `json:"name"`
+		Color string `json:"color"`
+	}
+	if err := decodeJSON(r, &req); err != nil || strings.TrimSpace(req.Name) == "" || !columnColorPattern.MatchString(req.Color) {
+		writeError(w, http.StatusBadRequest, "name and a #RRGGBB color are required")
+		return
+	}
+	if err := s.store.UpdateBoardColumn(chi.URLParam(r, "id"), strings.TrimSpace(req.Name), req.Color); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) deleteBoardColumn(w http.ResponseWriter, r *http.Request) {
+	if err := s.store.DeleteBoardColumn(chi.URLParam(r, "id")); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) reorderBoardColumns(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs []string `json:"ids"`
+	}
+	if err := decodeJSON(r, &req); err != nil || len(req.IDs) == 0 {
+		writeError(w, http.StatusBadRequest, "column IDs are required")
+		return
+	}
+	if err := s.store.ReorderBoardColumns(req.IDs); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
