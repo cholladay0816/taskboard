@@ -252,6 +252,12 @@ export default function Board() {
     try {
       const board = await api.board.get(selectedProject || undefined);
       setColumns(board.columns || []);
+      setSelectedTicket((current) => {
+        if (!current) return current;
+        return board.columns
+          ?.flatMap((column) => column.tickets)
+          .find((ticket) => ticket.id === current.id) || null;
+      });
     } catch {
       // Keep the last board visible if a background refresh fails.
     }
@@ -264,18 +270,20 @@ export default function Board() {
   }, []);
 
   useEffect(() => {
+    // Initial and filter-change loads are intentionally started by this effect.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     loadBoard();
   }, [loadBoard]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
-      if (document.visibilityState === "visible" && !activeTicket && !selectedTicket && !createForStatus) {
+      if (document.visibilityState === "visible" && !activeTicket && !createForStatus) {
         loadBoard();
       }
     }, BOARD_POLL_INTERVAL_MS);
     return () => window.clearInterval(interval);
-  }, [activeTicket, selectedTicket, createForStatus, loadBoard]);
+  }, [activeTicket, createForStatus, loadBoard]);
 
   const getColumnTickets = (status: string) =>
     columns.find((c) => c.status === status)?.tickets || [];
