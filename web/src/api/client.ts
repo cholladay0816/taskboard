@@ -39,6 +39,7 @@ export interface Ticket {
   title: string;
   description: string;
   status: string;
+  archived: boolean;
   priority: string;
   dueDate?: string;
   position: number;
@@ -51,8 +52,17 @@ export interface Ticket {
 }
 
 export interface BoardColumn {
-  status: string;
+  id: string;
+  name: string;
+  color: string;
   tickets: Ticket[];
+}
+
+export interface BoardColumnDefinition {
+  id: string;
+  name: string;
+  color: string;
+  position: number;
 }
 
 export interface Board {
@@ -123,6 +133,8 @@ export const api = {
       }),
     delete: (id: string) =>
       request<void>(`/api/tickets/${id}`, { method: "DELETE" }),
+    archive: (id: string) =>
+      request<void>(`/api/tickets/${id}/archive`, { method: "POST" }),
     move: (id: string, status: string, position?: number) =>
       request<Ticket>(`/api/tickets/${id}/move`, {
         method: "POST",
@@ -161,5 +173,12 @@ export const api = {
   board: {
     get: (projectId?: string) =>
       request<Board>(`/api/board${projectId ? `?projectId=${projectId}` : ""}`),
+  },
+  boardColumns: {
+    list: () => request<BoardColumnDefinition[]>("/api/board-columns"),
+    create: (name: string) => request<BoardColumnDefinition>("/api/board-columns", { method: "POST", body: JSON.stringify({ name }) }),
+    update: (id: string, name: string) => request<void>(`/api/board-columns/${id}`, { method: "PUT", body: JSON.stringify({ name }) }),
+    delete: (id: string) => request<void>(`/api/board-columns/${id}`, { method: "DELETE" }),
+    reorder: (ids: string[]) => request<void>("/api/board-columns/reorder", { method: "POST", body: JSON.stringify({ ids }) }),
   },
 };

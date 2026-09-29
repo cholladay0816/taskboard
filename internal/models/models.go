@@ -29,11 +29,13 @@ type Ticket struct {
 	Title       string     `json:"title"`
 	Description string     `json:"description,omitempty"`
 	Status      string     `json:"status"`
+	Archived    bool       `json:"archived"`
 	Priority    string     `json:"priority"`
 	DueDate     *time.Time `json:"dueDate,omitempty"`
 	Position    float64    `json:"position"`
 	CreatedAt   time.Time  `json:"createdAt"`
 	UpdatedAt   time.Time  `json:"updatedAt"`
+	CompletedAt *time.Time `json:"completedAt,omitempty"`
 
 	// Populated fields (not stored directly)
 	ProjectPrefix string    `json:"projectPrefix,omitempty"`
@@ -96,8 +98,17 @@ type Board struct {
 }
 
 type Column struct {
-	Status  string   `json:"status"`
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Color   string   `json:"color"`
 	Tickets []Ticket `json:"tickets"`
+}
+
+type BoardColumn struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Color    string `json:"color"`
+	Position int    `json:"position"`
 }
 
 type CreateProjectRequest struct {
@@ -140,6 +151,7 @@ type CreateTicketRequest struct {
 }
 
 type UpdateTicketRequest struct {
+	ProjectID   *string  `json:"projectId,omitempty"`
 	TeamID      *string  `json:"teamId,omitempty"`
 	Title       *string  `json:"title,omitempty"`
 	Description *string  `json:"description,omitempty"`
@@ -171,8 +183,9 @@ type UpdateLabelRequest struct {
 }
 
 type TicketFilter struct {
-	ProjectID string
-	TeamID    string
-	Status    string
-	Priority  string
+	ProjectID       string
+	TeamID          string
+	Status          string
+	Priority        string
+	IncludeArchived bool
 }

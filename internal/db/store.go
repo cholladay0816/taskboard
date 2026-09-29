@@ -218,12 +218,83 @@ func (s *Store) nextTicketNumber(projectID string) (int, error) {
 	return num, err
 }
 
+func (s *Store) ListBoardColumns() ([]models.BoardColumn, error) {
+	rows, err := s.db.Query("SELECT id, name, color, position FROM board_columns ORDER BY position, id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var columns []models.BoardColumn
+	for rows.Next() {
+		var column models.BoardColumn
+		if err := rows.Scan(&column.ID, &column.Name, &column.Color, &column.Position); err != nil {
+			return nil, err
+		}
+		columns = append(columns, column)
+	}
+	return columns, rows.Err()
+}
+
+func (s *Store) CreateBoardColumn(name string) (*models.BoardColumn, error) {
+	var position int
+	if err := s.db.QueryRow("SELECT COALESCE(MAX(position), -1) + 1 FROM board_columns").Scan(&position); err != nil {
+		return nil, err
+	}
+	column := &models.BoardColumn{ID: newID(), Name: name, Color: "#a78bfa", Position: position}
+	_, err := s.db.Exec("INSERT INTO board_columns (id, name, color, position) VALUES (?, ?, ?, ?)", column.ID, column.Name, column.Color, column.Position)
+	return column, err
+}
+
+func (s *Store) UpdateBoardColumn(id, name string) error {
+	_, err := s.db.Exec("UPDATE board_columns SET name = ? WHERE id = ?", name, id)
+	return err
+}
+
+func (s *Store) DeleteBoardColumn(id string) error {
+	var count int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM tickets WHERE status = ? AND archived = FALSE", id).Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return fmt.Errorf("move or archive all tickets before deleting this column")
+	}
+	_, err := s.db.Exec("DELETE FROM board_columns WHERE id = ?", id)
+	return err
+}
+
+func (s *Store) ReorderBoardColumns(ids []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	for position, id := range ids {
+		result, err := tx.Exec("UPDATE board_columns SET position = ? WHERE id = ?", position, id)
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+		changed, _ := result.RowsAffected()
+		if changed == 0 {
+			tx.Rollback()
+			return fmt.Errorf("board column not found")
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error) {
 	query := `SELECT t.id, t.project_id, t.team_id, t.number, t.title, t.description,
-		t.status, t.priority, t.due_date, t.position, t.created_at, t.updated_at,
+		t.status, t.archived, t.priority, t.due_date, t.position, t.created_at, t.updated_at, t.completed_at,
 		COALESCE(p.prefix, '') as project_prefix
-		FROM tickets t LEFT JOIN projects p ON t.project_id = p.id WHERE 1=1`
+		FROM tickets t LEFT JOIN projects p ON t.project_id = p.id WHERE t.archived = FALSE`
 	args := []any{}
+	if filter.IncludeArchived {
+		query = `SELECT t.id, t.project_id, t.team_id, t.number, t.title, t.description,
+			t.status, t.archived, t.priority, t.due_date, t.position, t.created_at, t.updated_at, t.completed_at,
+			COALESCE(p.prefix, '') as project_prefix
+			FROM tickets t LEFT JOIN projects p ON t.project_id = p.id WHERE 1=1`
+	}
 
 	if filter.ProjectID != "" {
 		query += " AND t.project_id = ?"
@@ -253,7 +324,7 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 	for rows.Next() {
 		var t models.Ticket
 		if err := rows.Scan(&t.ID, &t.ProjectID, &t.TeamID, &t.Number, &t.Title, &t.Description,
-			&t.Status, &t.Priority, &t.DueDate, &t.Position, &t.CreatedAt, &t.UpdatedAt,
+			&t.Status, &t.Archived, &t.Priority, &t.DueDate, &t.Position, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt,
 			&t.ProjectPrefix); err != nil {
 			return nil, err
 		}
@@ -276,11 +347,11 @@ func (s *Store) GetTicket(id string) (*models.Ticket, error) {
 	var t models.Ticket
 	err := s.db.QueryRow(
 		`SELECT t.id, t.project_id, t.team_id, t.number, t.title, t.description,
-		t.status, t.priority, t.due_date, t.position, t.created_at, t.updated_at,
+		t.status, t.archived, t.priority, t.due_date, t.position, t.created_at, t.updated_at, t.completed_at,
 		COALESCE(p.prefix, '') as project_prefix
 		FROM tickets t LEFT JOIN projects p ON t.project_id = p.id WHERE t.id = ?`, id,
 	).Scan(&t.ID, &t.ProjectID, &t.TeamID, &t.Number, &t.Title, &t.Description,
-		&t.Status, &t.Priority, &t.DueDate, &t.Position, &t.CreatedAt, &t.UpdatedAt,
+		&t.Status, &t.Archived, &t.Priority, &t.DueDate, &t.Position, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt,
 		&t.ProjectPrefix)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -324,6 +395,9 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
+	if status == "done" {
+		t.CompletedAt = &t.UpdatedAt
+	}
 
 	if req.DueDate != nil {
 		parsed, err := time.Parse("2006-01-02", *req.DueDate)
@@ -333,9 +407,9 @@ func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, er
 	}
 
 	_, err = s.db.Exec(
-		`INSERT INTO tickets (id, project_id, team_id, number, title, description, status, priority, due_date, position, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.ProjectID, t.TeamID, t.Number, t.Title, t.Description, t.Status, t.Priority, t.DueDate, t.Position, t.CreatedAt, t.UpdatedAt,
+		`INSERT INTO tickets (id, project_id, team_id, number, title, description, status, priority, due_date, position, created_at, updated_at, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.ProjectID, t.TeamID, t.Number, t.Title, t.Description, t.Status, t.Priority, t.DueDate, t.Position, t.CreatedAt, t.UpdatedAt, t.CompletedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -368,8 +442,26 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest) (*models
 	if req.Description != nil {
 		t.Description = *req.Description
 	}
-	if req.Status != nil {
+	if req.Status != nil && *req.Status != t.Status {
 		t.Status = *req.Status
+		if t.Status == "done" {
+			completed := time.Now()
+			t.CompletedAt = &completed
+		} else {
+			t.CompletedAt = nil
+		}
+	}
+	if req.ProjectID != nil && *req.ProjectID != t.ProjectID {
+		project, err := s.GetProject(*req.ProjectID)
+		if err != nil || project == nil {
+			return nil, err
+		}
+		number, err := s.nextTicketNumber(*req.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		t.ProjectID = *req.ProjectID
+		t.Number = number
 	}
 	if req.Priority != nil {
 		t.Priority = *req.Priority
@@ -389,8 +481,8 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest) (*models
 	t.UpdatedAt = time.Now()
 
 	_, err = s.db.Exec(
-		`UPDATE tickets SET team_id=?, title=?, description=?, status=?, priority=?, due_date=?, position=?, updated_at=? WHERE id=?`,
-		t.TeamID, t.Title, t.Description, t.Status, t.Priority, t.DueDate, t.Position, t.UpdatedAt, t.ID,
+		`UPDATE tickets SET project_id=?, number=?, team_id=?, title=?, description=?, status=?, priority=?, due_date=?, position=?, updated_at=?, completed_at=? WHERE id=?`,
+		t.ProjectID, t.Number, t.TeamID, t.Title, t.Description, t.Status, t.Priority, t.DueDate, t.Position, t.UpdatedAt, t.CompletedAt, t.ID,
 	)
 	if err != nil {
 		return nil, err
@@ -424,8 +516,10 @@ func (s *Store) MoveTicket(id string, req models.MoveTicketRequest) (*models.Tic
 		position = maxPos
 	}
 
-	_, err := s.db.Exec("UPDATE tickets SET status=?, position=?, updated_at=? WHERE id=?",
-		req.Status, position, now, id)
+	_, err := s.db.Exec(`UPDATE tickets SET status=?, position=?, updated_at=?,
+		completed_at=CASE WHEN status != ? AND ? = 'done' THEN ?
+			WHEN ? != 'done' THEN NULL ELSE completed_at END WHERE id=?`,
+		req.Status, position, now, req.Status, req.Status, now, req.Status, id)
 	if err != nil {
 		return nil, err
 	}
@@ -437,15 +531,69 @@ func (s *Store) DeleteTicket(id string) error {
 	return err
 }
 
+func (s *Store) ArchiveTicket(id string) error {
+	_, err := s.db.Exec("UPDATE tickets SET archived = TRUE, updated_at = ? WHERE id = ?", time.Now(), id)
+	return err
+}
+
+// ArchiveCompletedTickets archives unarchived done tickets completed strictly before cutoff.
+func (s *Store) ArchiveCompletedTickets(cutoff time.Time) (int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query("SELECT id, completed_at FROM tickets WHERE status = 'done' AND archived = FALSE AND completed_at IS NOT NULL")
+	if err != nil {
+		return 0, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		var completedAt time.Time
+		if err := rows.Scan(&id, &completedAt); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		if completedAt.Before(cutoff) {
+			ids = append(ids, id)
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return 0, err
+	}
+	var count int64
+	for _, id := range ids {
+		result, err := tx.Exec("UPDATE tickets SET archived = TRUE, updated_at = ? WHERE id = ? AND status = 'done' AND archived = FALSE", time.Now(), id)
+		if err != nil {
+			return 0, err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		count += changed
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 func (s *Store) GetBoard(projectID string) (*models.Board, error) {
-	statuses := []string{"todo", "in_progress", "done"}
+	columns, err := s.ListBoardColumns()
+	if err != nil {
+		return nil, err
+	}
 	board := &models.Board{
 		ProjectID: projectID,
-		Columns:   make([]models.Column, len(statuses)),
+		Columns:   make([]models.Column, len(columns)),
 	}
 
-	for i, status := range statuses {
-		filter := models.TicketFilter{Status: status}
+	for i, column := range columns {
+		filter := models.TicketFilter{Status: column.ID}
 		if projectID != "" {
 			filter.ProjectID = projectID
 		}
@@ -457,7 +605,9 @@ func (s *Store) GetBoard(projectID string) (*models.Board, error) {
 			tickets = []models.Ticket{}
 		}
 		board.Columns[i] = models.Column{
-			Status:  status,
+			ID:      column.ID,
+			Name:    column.Name,
+			Color:   column.Color,
 			Tickets: tickets,
 		}
 	}

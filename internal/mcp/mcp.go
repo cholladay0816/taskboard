@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/tcarac/taskboard/internal/db"
 	"github.com/tcarac/taskboard/internal/models"
@@ -285,6 +286,10 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		json.Unmarshal(args, &a)
 		return map[string]bool{"deleted": true}, s.store.DeleteTicket(a.ID)
 
+	case "archive_completed_tickets":
+		count, err := s.store.ArchiveCompletedTickets(time.Now().Add(-72 * time.Hour))
+		return map[string]int64{"archivedCount": count}, err
+
 	case "get_board":
 		var a struct {
 			ProjectID string `json:"projectId"`
@@ -467,7 +472,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				Properties: map[string]schemaProp{
 					"projectId": {Type: "string", Description: "Filter by project ID"},
 					"teamId":    {Type: "string", Description: "Filter by team ID"},
-					"status":    {Type: "string", Description: "Filter by status", Enum: []string{"todo", "in_progress", "done"}},
+					"status":    {Type: "string", Description: "Filter by status", Enum: []string{"todo", "in_progress", "blocked", "done"}},
 					"priority":  {Type: "string", Description: "Filter by priority", Enum: []string{"urgent", "high", "medium", "low"}},
 				},
 			},
@@ -493,7 +498,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"projectId":   {Type: "string", Description: "Project ID"},
 					"title":       {Type: "string", Description: "Ticket title"},
 					"description": {Type: "string", Description: "Rich text description"},
-					"status":      {Type: "string", Description: "Initial status", Enum: []string{"todo", "in_progress", "done"}},
+					"status":      {Type: "string", Description: "Initial status", Enum: []string{"todo", "in_progress", "blocked", "done"}},
 					"priority":    {Type: "string", Description: "Priority level", Enum: []string{"urgent", "high", "medium", "low"}},
 					"teamId":      {Type: "string", Description: "Team ID"},
 					"dueDate":     {Type: "string", Description: "Due date (YYYY-MM-DD)"},
@@ -510,7 +515,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"id":          {Type: "string", Description: "Ticket ID"},
 					"title":       {Type: "string", Description: "Ticket title"},
 					"description": {Type: "string", Description: "Description"},
-					"status":      {Type: "string", Description: "Status", Enum: []string{"todo", "in_progress", "done"}},
+					"status":      {Type: "string", Description: "Status", Enum: []string{"todo", "in_progress", "blocked", "done"}},
 					"priority":    {Type: "string", Description: "Priority", Enum: []string{"urgent", "high", "medium", "low"}},
 					"teamId":      {Type: "string", Description: "Team ID"},
 					"dueDate":     {Type: "string", Description: "Due date (YYYY-MM-DD)"},
@@ -525,7 +530,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				Type: "object",
 				Properties: map[string]schemaProp{
 					"id":     {Type: "string", Description: "Ticket ID"},
-					"status": {Type: "string", Description: "Target status", Enum: []string{"todo", "in_progress", "done"}},
+					"status": {Type: "string", Description: "Target status", Enum: []string{"todo", "in_progress", "blocked", "done"}},
 				},
 				Required: []string{"id", "status"},
 			},
@@ -539,10 +544,15 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				Required:   []string{"id"},
 			},
 		},
+		{
+			Name:        "archive_completed_tickets",
+			Description: "Archive all unarchived done tickets completed more than 72 hours ago. Returns the number archived; archived tickets remain retrievable by ID.",
+			InputSchema: jsonSchema{Type: "object"},
+		},
 		// --- Board ---
 		{
 			Name:        "get_board",
-			Description: "Get full Kanban board grouped by status columns (todo, in_progress, done)",
+			Description: "Get full Kanban board grouped by status columns (todo, in_progress, blocked, done)",
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{

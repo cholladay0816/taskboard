@@ -12,13 +12,15 @@ Single binary. SQLite-backed. No Docker, no external database, no runtime depend
 
 ## Features
 
-- **Kanban Board** — drag-and-drop ticket management across Todo, In Progress, and Done columns
+- **Customizable Kanban Board** — drag-and-drop tickets across Todo, In Progress, Blocked, Done, and your own columns; rename, reorder, and remove empty columns
 - **Projects** — organize work with customizable projects (icons, colors, prefixes)
 - **Teams** — assign tickets to teams
-- **Tickets** — priority levels, due dates, labels, subtasks, dependencies (blocked by)
+- **Tickets** — priority levels, due dates, labels, subtasks, dependencies (blocked by), project reassignment, and archive/delete actions
+- **Automatic Archiving** — archive completed tickets older than 72 hours through the MCP tool; archived tickets remain accessible by ID
+- **Markdown Descriptions** — preview ticket descriptions with GitHub-flavored tables and task lists
 - **Embedded Terminal** — run AI coding agents (opencode, Claude Code) directly from the web UI
 - **CLI** — manage everything from the terminal
-- **MCP Server** — 22 tools for AI-native project management via Model Context Protocol
+- **MCP Server** — 23 tools for AI-native project management via Model Context Protocol
 - **Self-Hosted** — your data stays on your machine in a SQLite database
 - **Single Binary** — one `brew install` and you're running
 
@@ -104,7 +106,7 @@ Project → Ticket → Subtask
 - **Tickets** are concrete, actionable tasks within a project. Don't create "epic" tickets — use projects.
 - **Subtasks** are checklist steps within a ticket, for breaking work into verifiable pieces.
 
-#### Available MCP Tools (22)
+#### Available MCP Tools (23)
 
 | Tool                    | Description                                      |
 | ----------------------- | ------------------------------------------------ |
@@ -127,6 +129,7 @@ Project → Ticket → Subtask
 | `update_ticket`         | Update ticket properties                         |
 | `move_ticket`           | Move ticket to different status column           |
 | `delete_ticket`         | Delete a ticket                                  |
+| `archive_completed_tickets` | Archive done tickets completed over 72 hours ago (returns count) |
 | **Board**               |                                                  |
 | `get_board`             | Get full Kanban board grouped by status          |
 | **Subtasks**            |                                                  |
@@ -177,6 +180,7 @@ All data is stored in a SQLite database at:
 
 - **macOS**: `~/Library/Application Support/taskboard/taskboard.db`
 - **Linux**: `~/.config/taskboard/taskboard.db`
+- **Windows**: `%AppData%\taskboard\taskboard.db`
 
 Migrations run automatically on first start.
 

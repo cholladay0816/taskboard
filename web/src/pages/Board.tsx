@@ -23,22 +23,17 @@ import {
   FolderKanban,
   Users,
   Plus,
+  ChevronLeft,
+  ChevronRight,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 import { api, type Ticket, type Project, type Team, type BoardColumn } from "../api/client";
 import TicketPanel from "../components/TicketPanel";
 import CreateTicketModal from "../components/CreateTicketModal";
+import TicketContextMenu from "../components/TicketContextMenu";
 
-const STATUSES = ["todo", "in_progress", "done"];
-const STATUS_LABELS: Record<string, string> = {
-  todo: "Todo",
-  in_progress: "In Progress",
-  done: "Done",
-};
-const STATUS_COLORS: Record<string, string> = {
-  todo: "bg-slate-500",
-  in_progress: "bg-blue-500",
-  done: "bg-green-500",
-};
+const BOARD_POLL_INTERVAL_MS = 5000;
 
 const PRIORITY_CONFIG: Record<string, { color: string; icon: typeof ArrowUp }> = {
   urgent: { color: "text-red-500", icon: AlertTriangle },
@@ -85,12 +80,14 @@ function TicketCard({
   teams,
   isDragging,
   onClick,
+  onContextMenu,
 }: {
   ticket: Ticket;
   projects: Project[];
   teams: Team[];
   isDragging?: boolean;
   onClick?: () => void;
+  onContextMenu?: (event: React.MouseEvent) => void;
 }) {
   const project = projects.find((p) => p.id === ticket.projectId);
   const team = teams.find((t) => t.id === ticket.teamId);
@@ -98,8 +95,9 @@ function TicketCard({
   return (
     <div
       onClick={onClick}
-      className={`rounded-lg border border-slate-700/50 bg-slate-900 p-3 space-y-2 transition-colors hover:border-slate-600 cursor-pointer ${
-        isDragging ? "opacity-90 shadow-xl shadow-blue-500/10 rotate-2" : ""
+      onContextMenu={onContextMenu}
+      className={`rounded-xl border border-white/[0.07] bg-[#111827] p-3.5 space-y-2.5 transition-all hover:border-white/[0.16] hover:bg-[#151d2d] hover:-translate-y-0.5 cursor-pointer ${
+        isDragging ? "opacity-90 shadow-xl shadow-cyan-500/10 rotate-2" : ""
       }`}
     >
       <div className="flex items-start justify-between gap-2">
@@ -153,11 +151,13 @@ function DraggableTicket({
   projects,
   teams,
   onClick,
+  onContextMenu,
 }: {
   ticket: Ticket;
   projects: Project[];
   teams: Team[];
   onClick: () => void;
+  onContextMenu: (event: React.MouseEvent) => void;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: ticket.id,
@@ -171,47 +171,63 @@ function DraggableTicket({
       {...attributes}
       className={`cursor-grab active:cursor-grabbing ${isDragging ? "opacity-30" : ""}`}
     >
-      <TicketCard ticket={ticket} projects={projects} teams={teams} onClick={onClick} />
+      <TicketCard ticket={ticket} projects={projects} teams={teams} onClick={onClick} onContextMenu={onContextMenu} />
     </div>
   );
 }
 
 function Column({
-  status,
+  column,
+  index,
+  columnCount,
   tickets,
   projects,
   teams,
   onTicketClick,
+  onTicketContextMenu,
   onAddTicket,
+  onRename,
+  onDelete,
+  onMove,
 }: {
-  status: string;
+  column: BoardColumn;
+  index: number;
+  columnCount: number;
   tickets: Ticket[];
   projects: Project[];
   teams: Team[];
   onTicketClick: (ticket: Ticket) => void;
-  onAddTicket: (status: string) => void;
+  onTicketContextMenu: (ticket: Ticket, event: React.MouseEvent) => void;
+  onAddTicket: (columnID: string) => void;
+  onRename: (column: BoardColumn) => void;
+  onDelete: (column: BoardColumn) => void;
+  onMove: (column: BoardColumn, direction: -1 | 1) => void;
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: status });
+  const { setNodeRef, isOver } = useDroppable({ id: column.id });
 
   return (
-    <div className="flex flex-col w-80 shrink-0">
-      <div className="flex items-center gap-2 px-1 pb-3">
-        <div className={`w-2 h-2 rounded-full ${STATUS_COLORS[status]}`} />
-        <h3 className="text-sm font-medium text-slate-300">
-          {STATUS_LABELS[status]}
+    <div className="flex min-h-0 w-80 shrink-0 flex-col">
+      <div className="flex items-center gap-1 px-1 pb-3">
+        <div className="h-2 w-2 rounded-full" style={{ backgroundColor: column.color }} />
+        <h3 className="min-w-0 flex-1 truncate px-1 text-sm font-semibold text-slate-200" title={column.name}>
+          {column.name}
         </h3>
-        <span className="text-xs text-slate-600 ml-auto">{tickets.length}</span>
+        <span className="shrink-0 rounded-full bg-white/[0.06] px-2 py-0.5 text-[11px] font-medium text-slate-500">{tickets.length}</span>
         <button
-          onClick={() => onAddTicket(status)}
-          className="text-slate-600 hover:text-slate-300 transition-colors"
+          onClick={() => onAddTicket(column.id)}
+          className="rounded-md p-1 text-slate-600 hover:bg-white/[0.06] hover:text-slate-300 transition-colors"
         >
           <Plus className="w-4 h-4" />
         </button>
+        <button onClick={() => onRename(column)} aria-label={`Rename ${column.name}`} className="rounded-md p-1 text-slate-600 hover:bg-white/[0.06] hover:text-slate-300"><Pencil className="w-3.5 h-3.5" /></button>
+        <button disabled={index === 0} onClick={() => onMove(column, -1)} aria-label={`Move ${column.name} left`} className="rounded-md p-1 text-slate-600 hover:bg-white/[0.06] hover:text-slate-300 disabled:opacity-30"><ChevronLeft className="w-3.5 h-3.5" /></button>
+        <button disabled={index === columnCount - 1} onClick={() => onMove(column, 1)} aria-label={`Move ${column.name} right`} className="rounded-md p-1 text-slate-600 hover:bg-white/[0.06] hover:text-slate-300 disabled:opacity-30"><ChevronRight className="w-3.5 h-3.5" /></button>
+        <button disabled={tickets.length > 0} onClick={() => onDelete(column)} aria-label={`Delete ${column.name}`} className="rounded-md p-1 text-slate-600 hover:bg-red-400/[0.1] hover:text-red-300 disabled:opacity-30"><Trash2 className="w-3.5 h-3.5" /></button>
       </div>
       <div
         ref={setNodeRef}
-        className={`flex-1 space-y-2 rounded-lg p-2 transition-colors min-h-32 ${
-          isOver ? "bg-blue-500/5 ring-1 ring-blue-500/20" : ""
+        className={`min-h-32 min-w-0 flex-1 space-y-2.5 overflow-y-auto rounded-xl border border-white/[0.045] bg-white/[0.018] p-2.5 transition-colors ${
+          isOver ? "bg-cyan-400/[0.06] ring-1 ring-cyan-400/25" : ""
         }`}
       >
         {tickets.map((ticket) => (
@@ -221,10 +237,11 @@ function Column({
             projects={projects}
             teams={teams}
             onClick={() => onTicketClick(ticket)}
+            onContextMenu={(event) => onTicketContextMenu(ticket, event)}
           />
         ))}
         {tickets.length === 0 && (
-          <div className="flex items-center justify-center h-24 text-xs text-slate-700 border border-dashed border-slate-800 rounded-lg">
+          <div className="flex items-center justify-center h-24 text-xs text-slate-600 border border-dashed border-white/[0.08] rounded-lg">
             Drop tickets here
           </div>
         )}
@@ -242,6 +259,7 @@ export default function Board() {
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [createForStatus, setCreateForStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [contextMenu, setContextMenu] = useState<{ ticket: Ticket; x: number; y: number } | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -251,10 +269,15 @@ export default function Board() {
     try {
       const board = await api.board.get(selectedProject || undefined);
       setColumns(board.columns || []);
+      setSelectedTicket((current) => {
+        if (!current) return current;
+        const refreshed = board.columns
+          ?.flatMap((column) => column.tickets)
+          .find((ticket) => ticket.id === current.id);
+        return refreshed || null;
+      });
     } catch {
-      setColumns(
-        STATUSES.map((status) => ({ status, tickets: [] }))
-      );
+      // Keep the current board visible if a background refresh fails.
     }
     setLoading(false);
   }, [selectedProject]);
@@ -269,8 +292,16 @@ export default function Board() {
     loadBoard();
   }, [loadBoard]);
 
-  const getColumnTickets = (status: string) =>
-    columns.find((c) => c.status === status)?.tickets || [];
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === "visible" && !activeTicket) {
+        loadBoard();
+      }
+    };
+
+    const interval = window.setInterval(refresh, BOARD_POLL_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, [activeTicket, loadBoard]);
 
   const findTicketById = (id: UniqueIdentifier): Ticket | undefined => {
     for (const col of columns) {
@@ -282,7 +313,7 @@ export default function Board() {
 
   const findColumnByTicketId = (id: UniqueIdentifier): string | undefined => {
     for (const col of columns) {
-      if (col.tickets.find((t) => t.id === id)) return col.status;
+      if (col.tickets.find((t) => t.id === id)) return col.id;
     }
     return undefined;
   };
@@ -297,7 +328,7 @@ export default function Board() {
     if (!over) return;
 
     const activeStatus = findColumnByTicketId(active.id);
-    const overStatus = STATUSES.includes(over.id as string)
+    const overStatus = columns.some((column) => column.id === over.id)
       ? (over.id as string)
       : findColumnByTicketId(over.id);
 
@@ -305,10 +336,10 @@ export default function Board() {
 
     setColumns((prev) =>
       prev.map((col) => {
-        if (col.status === activeStatus) {
+        if (col.id === activeStatus) {
           return { ...col, tickets: col.tickets.filter((t) => t.id !== active.id) };
         }
-        if (col.status === overStatus) {
+        if (col.id === overStatus) {
           const ticket = findTicketById(active.id);
           if (!ticket) return col;
           return { ...col, tickets: [...col.tickets, { ...ticket, status: overStatus }] };
@@ -324,7 +355,7 @@ export default function Board() {
 
     if (!over) return;
 
-    const targetStatus = STATUSES.includes(over.id as string)
+    const targetStatus = columns.some((column) => column.id === over.id)
       ? (over.id as string)
       : findColumnByTicketId(over.id);
 
@@ -338,16 +369,32 @@ export default function Board() {
   };
 
   const handleTicketClick = (ticket: Ticket) => {
+    setContextMenu(null);
     setSelectedTicket(ticket);
   };
 
+  const handleTicketContextMenu = (ticket: Ticket, event: React.MouseEvent) => {
+    event.preventDefault();
+    setContextMenu({ ticket, x: event.clientX, y: event.clientY });
+  };
+
   const handleUpdate = async (id: string, data: Partial<Ticket>) => {
-    await api.tickets.update(id, data);
+    const updated = await api.tickets.update(id, data);
+    setSelectedTicket(updated);
     loadBoard();
   };
 
   const handleDelete = async (id: string) => {
     await api.tickets.delete(id);
+    setContextMenu(null);
+    setSelectedTicket(null);
+    loadBoard();
+  };
+
+  const handleArchive = async (id: string) => {
+    await api.tickets.archive(id);
+    setContextMenu(null);
+    setSelectedTicket(null);
     loadBoard();
   };
 
@@ -357,14 +404,47 @@ export default function Board() {
     loadBoard();
   };
 
+  const handleAddColumn = async () => {
+    const name = window.prompt("Column name");
+    if (!name?.trim()) return;
+    await api.boardColumns.create(name.trim());
+    loadBoard();
+  };
+
+  const handleRenameColumn = async (column: BoardColumn) => {
+    const name = window.prompt("Column name", column.name);
+    if (!name?.trim() || name.trim() === column.name) return;
+    await api.boardColumns.update(column.id, name.trim());
+    loadBoard();
+  };
+
+  const handleDeleteColumn = async (column: BoardColumn) => {
+    if (!window.confirm(`Delete the ${column.name} column?`)) return;
+    await api.boardColumns.delete(column.id);
+    loadBoard();
+  };
+
+  const handleMoveColumn = async (column: BoardColumn, direction: -1 | 1) => {
+    const currentIndex = columns.findIndex((item) => item.id === column.id);
+    const targetIndex = currentIndex + direction;
+    if (targetIndex < 0 || targetIndex >= columns.length) return;
+    const reordered = [...columns];
+    [reordered[currentIndex], reordered[targetIndex]] = [reordered[targetIndex], reordered[currentIndex]];
+    await api.boardColumns.reorder(reordered.map((item) => item.id));
+    loadBoard();
+  };
+
   return (
     <div className="h-full flex flex-col">
-      <header className="shrink-0 flex items-center justify-between px-6 h-14 border-b border-slate-800">
-        <h1 className="text-lg font-semibold text-white">Board</h1>
+      <header className="shrink-0 flex items-center justify-between px-5 sm:px-7 h-16 border-b border-white/[0.06]">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-400/80">Workspace</p>
+          <h1 className="text-lg font-semibold tracking-tight text-white">Board</h1>
+        </div>
         <select
           value={selectedProject}
           onChange={(e) => setSelectedProject(e.target.value)}
-          className="bg-slate-800 text-sm text-slate-300 rounded-md border border-slate-700 px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="bg-[#111827] text-sm text-slate-300 rounded-lg border border-white/[0.09] px-3 py-2 focus:outline-none focus:ring-2 focus:ring-cyan-400/30"
         >
           <option value="">All Projects</option>
           {projects.map((p) => (
@@ -375,7 +455,7 @@ export default function Board() {
         </select>
       </header>
 
-      <div className="flex-1 overflow-x-auto p-6">
+      <div className="min-h-0 flex-1 overflow-x-auto p-5 sm:p-7">
         {loading ? (
           <div className="flex items-center justify-center h-full text-slate-600">
             Loading board…
@@ -388,18 +468,25 @@ export default function Board() {
             onDragOver={handleDragOver}
             onDragEnd={handleDragEnd}
           >
-            <div className="flex gap-6 h-full">
-              {STATUSES.map((status) => (
+            <div className="flex h-full min-h-0 gap-6">
+              {columns.map((column, index) => (
                 <Column
-                  key={status}
-                  status={status}
-                  tickets={getColumnTickets(status)}
+                  key={column.id}
+                  column={column}
+                  index={index}
+                  columnCount={columns.length}
+                  tickets={column.tickets}
                   projects={projects}
                   teams={teams}
                   onTicketClick={handleTicketClick}
+                  onTicketContextMenu={handleTicketContextMenu}
                   onAddTicket={setCreateForStatus}
+                  onRename={handleRenameColumn}
+                  onDelete={handleDeleteColumn}
+                  onMove={handleMoveColumn}
                 />
               ))}
+              <button onClick={handleAddColumn} className="flex h-12 w-48 shrink-0 items-center justify-center gap-2 rounded-xl border border-dashed border-white/[0.14] text-sm text-slate-500 hover:border-cyan-400/40 hover:text-cyan-300"><Plus className="h-4 w-4" /> Add column</button>
             </div>
             <DragOverlay>
               {activeTicket ? (
@@ -427,12 +514,23 @@ export default function Board() {
           ticket={selectedTicket}
           projects={projects}
           teams={teams}
+          columns={columns.map(({ id, name, color }, position) => ({ id, name, color, position }))}
           onClose={() => {
             setSelectedTicket(null);
             loadBoard();
           }}
           onUpdate={handleUpdate}
           onDelete={handleDelete}
+        />
+      )}
+      {contextMenu && (
+        <TicketContextMenu
+          ticket={contextMenu.ticket}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onArchive={handleArchive}
+          onDelete={handleDelete}
+          onClose={() => setContextMenu(null)}
         />
       )}
     </div>

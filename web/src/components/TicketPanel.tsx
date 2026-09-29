@@ -1,21 +1,16 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { X, Trash2, CheckCircle2, Circle, Pencil, Eye } from "lucide-react";
 import Markdown from "react-markdown";
-import { api, type Ticket, type Project, type Team, type Subtask } from "../api/client";
+import remarkGfm from "remark-gfm";
+import { api, type Ticket, type Project, type Team, type Subtask, type BoardColumnDefinition } from "../api/client";
 
-const STATUSES = ["todo", "in_progress", "done"];
 const PRIORITIES = ["urgent", "high", "medium", "low"];
-
-const STATUS_LABELS: Record<string, string> = {
-  todo: "Todo",
-  in_progress: "In Progress",
-  done: "Done",
-};
 
 export default function TicketPanel({
   ticket,
   projects,
   teams,
+  columns,
   onClose,
   onUpdate,
   onDelete,
@@ -23,6 +18,7 @@ export default function TicketPanel({
   ticket: Ticket;
   projects: Project[];
   teams: Team[];
+  columns: BoardColumnDefinition[];
   onClose: () => void;
   onUpdate: (id: string, data: Partial<Ticket>) => void;
   onDelete: (id: string) => void;
@@ -33,10 +29,18 @@ export default function TicketPanel({
   const [priority, setPriority] = useState(ticket.priority);
   const [dueDate, setDueDate] = useState(ticket.dueDate || "");
   const [teamId, setTeamId] = useState(ticket.teamId || "");
+  const [projectId, setProjectId] = useState(ticket.projectId);
   const [subtasks, setSubtasks] = useState<Subtask[]>(ticket.subtasks || []);
   const [newSubtask, setNewSubtask] = useState("");
   const [dirty, setDirty] = useState(false);
   const [descMode, setDescMode] = useState<"preview" | "write">(description ? "preview" : "write");
+
+  useEffect(() => {
+    // Refresh the open panel when its ticket changes during background polling.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setStatus(ticket.status);
+    setSubtasks(ticket.subtasks || []);
+  }, [ticket.id, ticket.status, ticket.subtasks]);
 
   const markDirty = () => setDirty(true);
 
@@ -48,6 +52,7 @@ export default function TicketPanel({
       priority,
       dueDate: dueDate || undefined,
       teamId: teamId || undefined,
+      projectId,
     });
     setDirty(false);
   };
@@ -146,8 +151,8 @@ export default function TicketPanel({
                 className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-300 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y font-mono min-h-[10.5rem]"
               />
             ) : description ? (
-              <div className="prose-card bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 min-h-[10.5rem] overflow-y-auto">
-                <Markdown>{description}</Markdown>
+                <div className="prose-card bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2 min-h-[10.5rem] overflow-x-auto overflow-y-auto">
+                <Markdown remarkPlugins={[remarkGfm]}>{description}</Markdown>
               </div>
             ) : (
               <div
@@ -172,9 +177,9 @@ export default function TicketPanel({
                 }}
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
-                {STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {STATUS_LABELS[s]}
+                {columns.map((column) => (
+                  <option key={column.id} value={column.id}>
+                    {column.name}
                   </option>
                 ))}
               </select>
@@ -236,9 +241,18 @@ export default function TicketPanel({
               <label className="block text-xs font-medium text-slate-500 mb-1.5">
                 Project
               </label>
-              <div className="text-sm text-slate-400 px-3 py-2">
-                {projects.find((p) => p.id === ticket.projectId)?.name || "—"}
-              </div>
+              <select
+                value={projectId}
+                onChange={(e) => {
+                  setProjectId(e.target.value);
+                  markDirty();
+                }}
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>{project.name}</option>
+                ))}
+              </select>
             </div>
           </div>
 

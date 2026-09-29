@@ -73,8 +73,17 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 			r.Get("/{id}", s.getTicket)
 			r.Put("/{id}", s.updateTicket)
 			r.Post("/{id}/move", s.moveTicket)
+			r.Post("/{id}/archive", s.archiveTicket)
 			r.Delete("/{id}", s.deleteTicket)
 			r.Post("/{id}/subtasks", s.addSubtask)
+		})
+
+		r.Route("/board-columns", func(r chi.Router) {
+			r.Get("/", s.listBoardColumns)
+			r.Post("/", s.createBoardColumn)
+			r.Put("/{id}", s.updateBoardColumn)
+			r.Delete("/{id}", s.deleteBoardColumn)
+			r.Post("/reorder", s.reorderBoardColumns)
 		})
 
 		r.Route("/subtasks", func(r chi.Router) {
@@ -351,6 +360,77 @@ func (s *Server) moveTicket(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteTicket(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.DeleteTicket(chi.URLParam(r, "id")); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) listBoardColumns(w http.ResponseWriter, r *http.Request) {
+	columns, err := s.store.ListBoardColumns()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, columns)
+}
+
+func (s *Server) createBoardColumn(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &req); err != nil || req.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	column, err := s.store.CreateBoardColumn(req.Name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, column)
+}
+
+func (s *Server) updateBoardColumn(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &req); err != nil || req.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if err := s.store.UpdateBoardColumn(chi.URLParam(r, "id"), req.Name); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) deleteBoardColumn(w http.ResponseWriter, r *http.Request) {
+	if err := s.store.DeleteBoardColumn(chi.URLParam(r, "id")); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) reorderBoardColumns(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs []string `json:"ids"`
+	}
+	if err := decodeJSON(r, &req); err != nil || len(req.IDs) == 0 {
+		writeError(w, http.StatusBadRequest, "column IDs are required")
+		return
+	}
+	if err := s.store.ReorderBoardColumns(req.IDs); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) archiveTicket(w http.ResponseWriter, r *http.Request) {
+	if err := s.store.ArchiveTicket(chi.URLParam(r, "id")); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
